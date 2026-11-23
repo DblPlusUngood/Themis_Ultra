@@ -1,13 +1,17 @@
 """Event platform for Bookoo firmware 4 automatic-mode events."""
 
-from typing import ClassVar
+from typing import ClassVar, assert_never
 
 from aiobookoo_ultra.const import AutomaticModeEvent
 from homeassistant.components.event import EventEntity, EventEntityDescription
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import BookooConfigEntry, BookooCoordinator
+from .coordinator import (
+    BookooConfigEntry,
+    BookooCoordinator,
+    EspressoMonitorCoordinator,
+)
 from .entity import BookooEntity
 
 PARALLEL_UPDATES = 0
@@ -32,14 +36,21 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Bookoo automatic-mode event entity."""
-    async_add_entities(
-        [
-            BookooAutomaticModeEvent(
-                entry.runtime_data,
-                AUTOMATIC_MODE_EVENT_DESCRIPTION,
+    coordinator = entry.runtime_data
+    match coordinator:
+        case BookooCoordinator():
+            async_add_entities(
+                [
+                    BookooAutomaticModeEvent(
+                        coordinator,
+                        AUTOMATIC_MODE_EVENT_DESCRIPTION,
+                    )
+                ]
             )
-        ]
-    )
+        case EspressoMonitorCoordinator():
+            return
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class BookooAutomaticModeEvent(BookooEntity, EventEntity):

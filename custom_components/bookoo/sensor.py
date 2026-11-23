@@ -2,6 +2,7 @@
 
 from collections.abc import Callable  # noqa: I001
 from dataclasses import dataclass
+from typing import assert_never
 
 from aiobookoo_ultra.bookooscale import BookooScale
 from homeassistant.components.sensor import (
@@ -12,12 +13,19 @@ from homeassistant.components.sensor import (
     SensorExtraStoredData,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, UnitOfMass, UnitOfVolumeFlowRate, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfMass,
+    UnitOfPressure,
+    UnitOfTime,
+    UnitOfVolumeFlowRate,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import BookooConfigEntry
-from .entity import BookooEntity
+from .coordinator import BookooConfigEntry, BookooCoordinator, EspressoMonitorCoordinator
+from .entity import BookooEntity, EspressoMonitorEntity
+from .espresso_protocol import battery_available
 
 # Coordinator is used to centralize the data updates
 PARALLEL_UPDATES = 0
@@ -102,6 +110,21 @@ RESTORE_SENSORS: tuple[BookooSensorEntityDescription, ...] = (
 )
 
 
+PRESSURE_SENSOR = SensorEntityDescription(
+    key="pressure",
+    device_class=SensorDeviceClass.PRESSURE,
+    native_unit_of_measurement=UnitOfPressure.BAR,
+    suggested_display_precision=2,
+    state_class=SensorStateClass.MEASUREMENT,
+)
+BATTERY_SENSOR = SensorEntityDescription(
+    key="battery",
+    device_class=SensorDeviceClass.BATTERY,
+    native_unit_of_measurement=PERCENTAGE,
+    state_class=SensorStateClass.MEASUREMENT,
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: BookooConfigEntry,
@@ -110,14 +133,26 @@ async def async_setup_entry(
     """Set up sensors."""
 
     coordinator = entry.runtime_data
-    entities: list[SensorEntity] = [
-        BookooSensor(coordinator, entity_description) for entity_description in SENSORS
-    ]
-    entities.extend(
-        BookooRestoreSensor(coordinator, entity_description)
-        for entity_description in RESTORE_SENSORS
-    )
-    async_add_entities(entities)
+    match coordinator:
+        case EspressoMonitorCoordinator():
+            async_add_entities(
+                [
+                    EspressoMonitorPressureSensor(coordinator, PRESSURE_SENSOR),
+                    EspressoMonitorBatterySensor(coordinator, BATTERY_SENSOR),
+                ]
+            )
+        case BookooCoordinator():
+            entities: list[SensorEntity] = [
+                BookooSensor(coordinator, entity_description)
+                for entity_description in SENSORS
+            ]
+            entities.extend(
+                BookooRestoreSensor(coordinator, entity_description)
+                for entity_description in RESTORE_SENSORS
+            )
+            async_add_entities(entities)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class BookooSensor(BookooEntity, SensorEntity):
@@ -162,3 +197,57 @@ class BookooRestoreSensor(BookooEntity, RestoreSensor):
     def available(self) -> bool:
         """Return True if entity is available."""
         return super().available or self._restored_data is not None
+
+
+class EspressoMonitorPressureSensor(EspressoMonitorEntity, SensorEntity):
+    """Live brew pressure in bar."""
+
+    entity_description: SensorEntityDescription
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest pressure sample."""
+        return self._monitor.pressure_bar
+
+    @property
+    def available(self) -> bool:
+        """Stay unavailable until the first sample arrives."""
+        return super().available and self._monitor.pressure_bar is not None
+
+
+class EspressoMonitorBatterySensor(EspressoMonitorEntity, RestoreSensor):
+    """Battery percentage, restored while the monitor is asleep."""
+
+    entity_description: SensorEntityDescription
+    _restored_data: SensorExtraStoredData | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last battery reading."""
+        await super().async_added_to_hass()
+        self._restored_data = await self.async_get_last_sensor_data()
+        if self._restored_data is not None:
+            self._attr_native_value = self._restored_data.native_value
+            self._attr_native_unit_of_measurement = (
+                self._restored_data.native_unit_of_measurement
+            )
+        if self._monitor.battery_percent is not None:
+            self._attr_native_value = self._monitor.battery_percent
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Update battery when a notification includes a valid percentage."""
+        if self._monitor.battery_percent is not None:
+            self._attr_native_value = self._monitor.battery_percent
+        self._async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Keep the last percentage visible while the monitor sleeps."""
+        return battery_available(
+            connected=self._monitor.connected,
+            has_live_battery=self._monitor.battery_percent is not None,
+            has_cached_value=(
+                self._restored_data is not None or self._attr_native_value is not None
+            ),
+            coordinator_success=self.coordinator.last_update_success,
+        )

@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import BookooConfigEntry
+from .coordinator import EspressoMonitorCoordinator
 
 
 async def async_get_config_entry_diagnostics(
@@ -16,6 +17,18 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data
+    if isinstance(coordinator, EspressoMonitorCoordinator):
+        monitor = coordinator.monitor
+        return {
+            "model": monitor.model,
+            "mac": monitor.mac,
+            "connected": monitor.connected,
+            "streaming": monitor.streaming,
+            "pressure_bar": monitor.pressure_bar,
+            "battery_percent": monitor.battery_percent,
+            "last_disconnect_time": monitor.last_disconnect_time,
+        }
+
     scale = coordinator.scale
 
     # collect all data sources

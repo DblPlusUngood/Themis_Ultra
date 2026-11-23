@@ -1,10 +1,14 @@
-# Bookoo Themis Ultra – Home Assistant Integration
+# Bookoo Themis Ultra & Espresso Monitor – Home Assistant Integration
 
 Home Assistant custom integration for the **Bookoo Themis Ultra** Bluetooth
-scale. Communication is local over Bluetooth and uses the bundled
-`aiobookoo-ultra` library.
+scale and the **Bookoo Espresso Monitor** pressure sensor. Communication is
+local over Bluetooth. The scale uses the bundled `aiobookoo-ultra` library.
+The monitor uses Bookoo's published Espresso Monitor protocol.
 
-## Features
+Existing Themis Ultra config entries keep their entity unique IDs. An
+Espresso Monitor is discovered and set up as its own device.
+
+## Themis Ultra features
 
 | Entity | Function | Firmware |
 | --- | --- | --- |
@@ -33,15 +37,52 @@ intentionally not exposed as Home Assistant entities.
 
 1. Open **HACS** and select **Integrations**.
 2. Add this repository as a **custom repository**.
-3. Install **Bookoo Themis Ultra**.
+3. Install **Bookoo Themis & Espresso Monitor**.
 4. Restart Home Assistant.
 5. Add the Bookoo integration from **Settings > Devices & services**.
 
 Requirements:
 
 - Home Assistant 2024.1.0 or newer with Bluetooth support
-- Bookoo Themis Ultra scale
-- A local Bluetooth adapter or an ESPHome Bluetooth proxy
+- Bookoo Themis Ultra scale and/or Bookoo Espresso Monitor
+- A local Bluetooth adapter or an ESPHome Bluetooth proxy (active connections)
+
+## Espresso Monitor
+
+The monitor is a BLE pressure sensor that sits on an espresso machine. It is
+matched by the advertised name `BOOKOO_EM*` (also `BOOKOO ESPRESSO MONITOR`)
+or service UUID `00000fff-0000-1000-8000-00805f9b34fb`.
+
+| Entity | Function |
+| --- | --- |
+| Pressure sensor | Brew pressure in bar, updated at most once per second |
+| Battery sensor | Remaining battery percentage |
+| Connected binary sensor | Bluetooth connection status |
+| Start extraction button | Ask the monitor to stream pressure |
+| Stop extraction button | Ask the monitor to stop streaming |
+
+The monitor only notifies after a start-extraction command, so connecting
+sends that command. Stop leaves the link up and sends the stop command.
+The next reconnect resumes whichever command was used last.
+
+Home Assistant connects only while the scanner's last-seen time for a
+connectable advertisement is still recent, including advertisements whose
+payload has not changed. It drops the client when the link is lost, and a
+connection that finishes during unload is released too. A sleeping monitor
+therefore does not hold an ESPHome Bluetooth proxy connection slot. A failed
+start or stop command is retried while that link stays up.
+Live samples are pushed over GATT; the coordinator does not poll pressure.
+
+Protocol source:
+[BooKooCode/OpenSource – Espresso Monitor protocol](https://github.com/BooKooCode/OpenSource/blob/main/espresso_monitor/protocols.md)
+
+Pressure is protocol bytes 5 and 6 of an `02 1B` notification (the fifth and
+sixth bytes, indexes 4 and 5), as a big-endian unsigned 16-bit value of
+bar × 100. Byte 7 is the battery percentage.
+Values above 20 bar are ignored. The published protocol does not include a
+zero or tare command, so none is exposed. This decode was checked against
+the protocol table and the open-source BrewLog client. It has not been
+confirmed on hardware in this repository.
 
 ## Firmware 4.0.0 compatibility
 
@@ -63,9 +104,14 @@ Protocol source:
 ## Deutsche Dokumentation
 
 Diese benutzerdefinierte Home-Assistant-Integration bindet die
-**Bookoo Themis Ultra** lokal über Bluetooth ein. Ab Version 0.1.2 wird die
-Firmware 4.0.0 einschließlich Pulvergewicht, Automatikereignissen,
-Abschlussdaten und Ausschaltbefehl unterstützt.
+**Bookoo Themis Ultra** und den **Bookoo Espresso Monitor** lokal über
+Bluetooth ein. Ab Version 0.1.2 wird die Waagen-Firmware 4.0.0 einschließlich
+Pulvergewicht, Automatikereignissen, Abschlussdaten und Ausschaltbefehl
+unterstützt. Ab Version 0.2.0 kommt der Espresso Monitor als eigenes Gerät
+hinzu, mit Druck in bar, Batterie, Verbindungsstatus und Start-/Stopp-Befehl.
+Ein Nullpunkt- oder Tara-Befehl ist im veröffentlichten Monitor-Protokoll
+nicht enthalten. Bestehende Waagen-Einträge und Entitäts-IDs bleiben
+unverändert.
 
 ### Neue Entitäten mit Firmware 4.0.0
 
@@ -89,7 +135,7 @@ beim Entfernen der Tasse endet; sie stoppt nicht die Espressomaschine.
 
 1. **HACS** öffnen und **Integrationen** auswählen.
 2. Dieses Repository als **benutzerdefiniertes Repository** hinzufügen.
-3. **Bookoo Themis Ultra** installieren.
+3. **Bookoo Themis & Espresso Monitor** installieren.
 4. Home Assistant neu starten.
 5. Die Bookoo-Integration unter **Einstellungen > Geräte & Dienste**
    hinzufügen.

@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0
+
+- Add the Bookoo Espresso Monitor as its own Bluetooth device.
+- Expose brew pressure in bar, battery percentage, connection status, and
+  start/stop extraction controls.
+- Reconnect while the scanner still sees the monitor, including unchanged
+  advertisements, and release the proxy connection slot when the link drops
+  or setup is unloaded.
+- Retry a start or stop command that failed on a link that stayed open.
+- Keep the last battery percentage available while the monitor sleeps.
+- Keep existing Themis Ultra entries, entity IDs, and scale behavior unchanged.
+
 ## 0.1.2
 
 - Publish the firmware 4 update under an unused release version after the

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import assert_never
 
 from aiobookoo_ultra.bookooscale import BookooScale
 from homeassistant.components.number import (
@@ -18,7 +19,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import BookooConfigEntry
+from .coordinator import BookooConfigEntry, BookooCoordinator, EspressoMonitorCoordinator
 from .entity import BookooEntity
 
 PARALLEL_UPDATES = 0
@@ -122,9 +123,15 @@ async def async_setup_entry(
     """Set up number entities."""
 
     coordinator = entry.runtime_data
-    async_add_entities(
-        BookooNumber(coordinator, description) for description in NUMBERS
-    )
+    match coordinator:
+        case BookooCoordinator():
+            async_add_entities(
+                BookooNumber(coordinator, description) for description in NUMBERS
+            )
+        case EspressoMonitorCoordinator():
+            return
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class BookooNumber(BookooEntity, NumberEntity):

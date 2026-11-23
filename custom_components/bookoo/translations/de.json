@@ -19,7 +19,7 @@
           "address": "Gerät"
         },
         "data_description": {
-          "address": "Wähle die einzurichtende Bookoo-Waage aus"
+          "address": "Wähle das einzurichtende Bookoo-Gerät aus"
         },
         "description": "Wähle ein Gerät zur Einrichtung aus"
       }
@@ -49,6 +49,12 @@
       },
       "tare_and_start": {
         "name": "Tarieren und Timer starten"
+      },
+      "start_extraction": {
+        "name": "Extraktion starten"
+      },
+      "stop_extraction": {
+        "name": "Extraktion stoppen"
       }
     },
     "event": {

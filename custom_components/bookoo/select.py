@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import assert_never
 
 from aiobookoo_ultra.bookooscale import BookooScale
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
@@ -13,7 +14,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import BookooConfigEntry
+from .coordinator import BookooConfigEntry, BookooCoordinator, EspressoMonitorCoordinator
 from .entity import BookooEntity
 
 PARALLEL_UPDATES = 0
@@ -177,6 +178,14 @@ async def async_setup_entry(
     """Set up select entities."""
 
     coordinator = entry.runtime_data
+    match coordinator:
+        case EspressoMonitorCoordinator():
+            return
+        case BookooCoordinator():
+            pass
+        case _ as unreachable:
+            assert_never(unreachable)
+
     entities = [
         BookooSelect(coordinator, description)
         for description in SELECTS
