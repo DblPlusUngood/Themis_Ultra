@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import assert_never
 
 from aiobookoo_ultra.bookooscale import BookooScale
 
@@ -13,8 +14,8 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .coordinator import BookooConfigEntry
-from .entity import BookooEntity
+from .coordinator import BookooConfigEntry, BookooCoordinator, EspressoMonitorCoordinator
+from .entity import BookooEntity, EspressoMonitorEntity
 
 # Coordinator is used to centralize the data updates
 PARALLEL_UPDATES = 0
@@ -45,9 +46,23 @@ async def async_setup_entry(
     """Set up binary sensors."""
 
     coordinator = entry.runtime_data
-    async_add_entities(
-        BookooBinarySensor(coordinator, description) for description in BINARY_SENSORS
-    )
+    match coordinator:
+        case EspressoMonitorCoordinator():
+            async_add_entities(
+                [
+                    EspressoMonitorConnectedBinarySensor(
+                        coordinator,
+                        BINARY_SENSORS[0],
+                    )
+                ]
+            )
+        case BookooCoordinator():
+            async_add_entities(
+                BookooBinarySensor(coordinator, description)
+                for description in BINARY_SENSORS
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class BookooBinarySensor(BookooEntity, BinarySensorEntity):
@@ -59,3 +74,19 @@ class BookooBinarySensor(BookooEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return true if the binary sensor is on."""
         return self.entity_description.is_on_fn(self._scale)
+
+
+class EspressoMonitorConnectedBinarySensor(EspressoMonitorEntity, BinarySensorEntity):
+    """Connectivity that stays available while the monitor is asleep."""
+
+    entity_description: BookooBinarySensorEntityDescription
+
+    @property
+    def is_on(self) -> bool:
+        """Return True while the GATT session is up."""
+        return self._monitor.connected
+
+    @property
+    def available(self) -> bool:
+        """Stay available so off means disconnected, not missing."""
+        return self.coordinator.last_update_success

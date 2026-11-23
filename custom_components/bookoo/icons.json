@@ -24,6 +24,12 @@
       },
       "shutdown": {
         "default": "mdi:power"
+      },
+      "start_extraction": {
+        "default": "mdi:play"
+      },
+      "stop_extraction": {
+        "default": "mdi:stop"
       }
     },
     "event": {
@@ -37,6 +43,9 @@
       }
     },
     "sensor": {
+      "pressure": {
+        "default": "mdi:gauge"
+      },
       "automatic_mode_result": {
         "default": "mdi:chart-line"
       },

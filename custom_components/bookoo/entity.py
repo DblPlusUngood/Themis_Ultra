@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import BookooCoordinator
+from .coordinator import BookooCoordinator, EspressoMonitorCoordinator
 
 
 @dataclass
@@ -44,3 +44,33 @@ class BookooEntity(CoordinatorEntity[BookooCoordinator]):
     def available(self) -> bool:
         """Returns whether entity is available."""
         return super().available and self._scale.connected
+
+
+class EspressoMonitorEntity(CoordinatorEntity[EspressoMonitorCoordinator]):
+    """Common elements for Espresso Monitor entities."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: EspressoMonitorCoordinator,
+        entity_description: EntityDescription,
+    ) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self.entity_description = entity_description
+        self._monitor = coordinator.monitor
+        formatted_mac = format_mac(self._monitor.mac)
+        self._attr_unique_id = f"{formatted_mac}_{entity_description.key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, formatted_mac)},
+            manufacturer="Bookoo",
+            model=self._monitor.model,
+            suggested_area="Kitchen",
+            connections={(CONNECTION_BLUETOOTH, self._monitor.mac)},
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True when the monitor link is up."""
+        return super().available and self._monitor.connected

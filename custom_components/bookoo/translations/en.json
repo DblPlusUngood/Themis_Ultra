@@ -19,7 +19,7 @@
           "address": "Device"
         },
         "data_description": {
-          "address": "Select Bookoo scale you want to set up"
+          "address": "Select the Bookoo device you want to set up"
         },
         "description": "Choose a device to set up"
       }
@@ -49,6 +49,12 @@
       },
       "shutdown": {
         "name": "Shut down"
+      },
+      "start_extraction": {
+        "name": "Start extraction"
+      },
+      "stop_extraction": {
+        "name": "Stop extraction"
       }
     },
     "event": {
