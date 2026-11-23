@@ -25,6 +25,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import BookooConfigEntry, BookooCoordinator, EspressoMonitorCoordinator
 from .entity import BookooEntity, EspressoMonitorEntity
+from .espresso_protocol import battery_available
 
 # Coordinator is used to centralize the data updates
 PARALLEL_UPDATES = 0
@@ -242,6 +243,11 @@ class EspressoMonitorBatterySensor(EspressoMonitorEntity, RestoreSensor):
     @property
     def available(self) -> bool:
         """Keep the last percentage visible while the monitor sleeps."""
-        if self._monitor.connected and self._monitor.battery_percent is not None:
-            return super().available
-        return self._restored_data is not None
+        return battery_available(
+            connected=self._monitor.connected,
+            has_live_battery=self._monitor.battery_percent is not None,
+            has_cached_value=(
+                self._restored_data is not None or self._attr_native_value is not None
+            ),
+            coordinator_success=self.coordinator.last_update_success,
+        )

@@ -29,6 +29,9 @@ STOP_EXTRACTION_COMMAND = espresso_protocol.STOP_EXTRACTION_COMMAND
 EspressoMonitor = espresso_protocol.EspressoMonitor
 FRESH_ADVERTISEMENT_SECONDS = espresso_protocol.FRESH_ADVERTISEMENT_SECONDS
 advertisement_is_fresh = espresso_protocol.advertisement_is_fresh
+battery_available = espresso_protocol.battery_available
+preferred_advertisement_time = espresso_protocol.preferred_advertisement_time
+should_retry_extraction_command = espresso_protocol.should_retry_extraction_command
 backoff_deadline = espresso_protocol.backoff_deadline
 classify_discovery = espresso_protocol.classify_discovery
 decode_pressure_packet = espresso_protocol.decode_pressure_packet
@@ -163,6 +166,83 @@ def test_should_connect_only_when_advertising_and_backoff_elapsed() -> None:
             connectable_seen=True,
             now=15.0,
             not_before=15.0,
+        )
+        is True
+    )
+
+
+def test_service_info_time_beats_a_stale_change_callback() -> None:
+    """Unchanged advertisements still count when the scanner saw them recently."""
+    last_seen = preferred_advertisement_time(100.0, 10.0)
+
+    assert last_seen == 100.0
+    assert advertisement_is_fresh(last_seen, 100.0 + FRESH_ADVERTISEMENT_SECONDS)
+    assert advertisement_is_fresh(10.0, 100.0) is False
+    assert preferred_advertisement_time(None, 10.0) == 10.0
+
+
+def test_failed_extraction_command_is_retried_while_connected() -> None:
+    """A start command that failed on an open link is sent again later."""
+    assert (
+        should_retry_extraction_command(
+            connected=True,
+            command_pending=True,
+            closing=False,
+        )
+        is True
+    )
+    assert (
+        should_retry_extraction_command(
+            connected=True,
+            command_pending=False,
+            closing=False,
+        )
+        is False
+    )
+    assert (
+        should_retry_extraction_command(
+            connected=False,
+            command_pending=True,
+            closing=False,
+        )
+        is False
+    )
+    assert (
+        should_retry_extraction_command(
+            connected=True,
+            command_pending=True,
+            closing=True,
+        )
+        is False
+    )
+
+
+def test_battery_stays_available_from_the_live_cache_while_asleep() -> None:
+    """The first session has no restored state, but the last percentage remains."""
+    assert (
+        battery_available(
+            connected=False,
+            has_live_battery=False,
+            has_cached_value=True,
+            coordinator_success=True,
+        )
+        is True
+    )
+    assert (
+        battery_available(
+            connected=False,
+            has_live_battery=False,
+            has_cached_value=False,
+            coordinator_success=True,
+        )
+        is False
+    )
+    assert (
+        battery_available(
+            connected=True,
+            has_live_battery=True,
+            has_cached_value=False,
+            coordinator_success=True,
         )
         is True
     )

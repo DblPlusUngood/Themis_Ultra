@@ -65,9 +65,12 @@ The monitor only notifies after a start-extraction command, so connecting
 sends that command. Stop leaves the link up and sends the stop command.
 The next reconnect resumes whichever command was used last.
 
-Home Assistant connects only while the monitor is advertising as
-connectable, and it drops the client when the link is lost. A sleeping
-monitor therefore does not hold an ESPHome Bluetooth proxy connection slot.
+Home Assistant connects only while the scanner's last-seen time for a
+connectable advertisement is still recent, including advertisements whose
+payload has not changed. It drops the client when the link is lost, and a
+connection that finishes during unload is released too. A sleeping monitor
+therefore does not hold an ESPHome Bluetooth proxy connection slot. A failed
+start or stop command is retried while that link stays up.
 Live samples are pushed over GATT; the coordinator does not poll pressure.
 
 Protocol source:

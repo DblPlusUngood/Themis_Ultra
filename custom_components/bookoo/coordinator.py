@@ -41,7 +41,9 @@ from .espresso_protocol import (
     EspressoMonitor,
     advertisement_is_fresh,
     backoff_deadline,
+    preferred_advertisement_time,
     should_connect,
+    should_retry_extraction_command,
 )
 
 SCAN_INTERVAL = timedelta(seconds=5)
@@ -235,6 +237,7 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
         self._connect_task: asyncio.Task[None] | None = None
         self._last_advertisement: float | None = None
         self._startup_probe_used = False
+        self._command_pending = False
         self._closing = False
         self._async_register_bleak_connector(entry)
         self._async_register_bluetooth_callback(entry)
@@ -251,32 +254,69 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
         if connect_task is not None and not connect_task.done():
             connect_task.cancel()
         self._async_cancel_publish()
-        client = self._client
-        self._client = None
-        self._monitor.mark_disconnected(now=time.time())
-        if client is not None and client.is_connected:
-            try:
-                await client.disconnect()
-            except BleakError:
-                _LOGGER.debug(
-                    "Error while releasing Espresso Monitor %s",
-                    self._address,
-                    exc_info=True,
-                )
+        # Wait for a refresh that is already inside establish_connection.
+        async with self._connect_lock:
+            await self._async_release_client()
 
     async def async_start_extraction(self) -> None:
         """Ask the monitor to stream extraction data."""
         self._monitor.streaming = True
-        await self._async_write(START_EXTRACTION_COMMAND)
+        await self._async_send_extraction_command(START_EXTRACTION_COMMAND)
 
     async def async_stop_extraction(self) -> None:
         """Ask the monitor to stop streaming extraction data."""
         self._monitor.streaming = False
-        await self._async_write(STOP_EXTRACTION_COMMAND)
+        await self._async_send_extraction_command(STOP_EXTRACTION_COMMAND)
+
+    async def _async_send_extraction_command(self, payload: bytes) -> None:
+        """Write a command and remember it when the link stays up but the write fails."""
+        try:
+            await self._async_write(payload)
+        except HomeAssistantError:
+            self._command_pending = True
+            raise
+        self._command_pending = False
 
     async def _async_update_data(self) -> None:
         """Reconnect when the monitor is advertising. Never poll pressure."""
+        await self._async_retry_pending_command()
         await self._async_connect_if_needed()
+
+    async def _async_retry_pending_command(self) -> None:
+        """Resend start/stop when the first write failed on a link that is still up."""
+        if not should_retry_extraction_command(
+            connected=self._monitor.connected,
+            command_pending=self._command_pending,
+            closing=self._closing,
+        ):
+            return
+        try:
+            await self._async_write_desired_command()
+        except HomeAssistantError:
+            _LOGGER.debug(
+                "Espresso Monitor %s still has a pending extraction command",
+                self._address,
+                exc_info=True,
+            )
+            return
+        self._command_pending = False
+
+    async def _async_release_client(self) -> None:
+        """Disconnect whatever client this coordinator still owns."""
+        client = self._client
+        self._client = None
+        self._command_pending = False
+        self._monitor.mark_disconnected(now=time.time())
+        if client is None or not client.is_connected:
+            return
+        try:
+            await client.disconnect()
+        except BleakError:
+            _LOGGER.debug(
+                "Error while releasing Espresso Monitor %s",
+                self._address,
+                exc_info=True,
+            )
 
     async def _async_connect_if_needed(self) -> None:
         """Open a link only while the device is connectable and backoff allows it."""
@@ -300,13 +340,17 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
                 connectable=True,
             )
             now = time.monotonic()
+            last_seen = preferred_advertisement_time(
+                _service_info_time(self.hass, self._address),
+                self._last_advertisement,
+            )
             startup_probe = (
                 ble_device is not None
-                and self._last_advertisement is None
+                and last_seen is None
                 and not self._startup_probe_used
             )
             connectable_seen = ble_device is not None and (
-                advertisement_is_fresh(self._last_advertisement, now) or startup_probe
+                advertisement_is_fresh(last_seen, now) or startup_probe
             )
             if not should_connect(
                 connected=self._monitor.connected
@@ -363,10 +407,19 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
             )
             return
 
-        self._client = client
-        if not await self._async_subscribe(client):
+        if self._closing:
             await self._async_drop_client(client)
-            self._not_before = backoff_deadline(time.monotonic(), slots_exhausted=False)
+            return
+
+        self._client = client
+        subscribed = await self._async_subscribe(client)
+        if self._closing or not subscribed:
+            await self._async_drop_client(client)
+            if not self._closing:
+                self._not_before = backoff_deadline(
+                    time.monotonic(),
+                    slots_exhausted=False,
+                )
             return
 
         self._monitor.mark_connected()
@@ -375,11 +428,14 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
         try:
             await self._async_write_desired_command()
         except HomeAssistantError:
+            self._command_pending = True
             _LOGGER.debug(
                 "Espresso Monitor %s rejected the initial extraction command",
                 self._address,
                 exc_info=True,
             )
+        else:
+            self._command_pending = False
 
     async def _async_subscribe(self, client: BleakClientWithServiceCache) -> bool:
         """Subscribe to extraction data when both characteristics exist."""
@@ -526,13 +582,16 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
     @callback
     def _async_handle_bluetooth_seen(
         self,
-        _service_info: object,
+        service_info: object,
         _change: object,
     ) -> None:
         """Connect when the monitor wakes and starts advertising."""
         if self._closing or self._monitor.connected:
             return
-        self._last_advertisement = time.monotonic()
+        stamp = getattr(service_info, "time", None)
+        self._last_advertisement = (
+            float(stamp) if isinstance(stamp, (int, float)) else time.monotonic()
+        )
         if self._connect_task is not None and not self._connect_task.done():
             return
         self._connect_task = self.hass.async_create_task(
@@ -578,6 +637,23 @@ class EspressoMonitorCoordinator(DataUpdateCoordinator[None]):
                     self._async_handle_link_loss,
                 )
             )
+
+
+def _service_info_time(hass: HomeAssistant, address: str) -> float | None:
+    """Return the scanner's monotonic last-seen time, including unchanged ads."""
+    getter = getattr(bluetooth, "async_last_service_info", None)
+    if not callable(getter):
+        return None
+    try:
+        info = getter(hass, address, connectable=True)
+    except TypeError:
+        info = getter(hass, address)
+    if info is None:
+        return None
+    stamp = getattr(info, "time", None)
+    if isinstance(stamp, (int, float)):
+        return float(stamp)
+    return None
 
 
 def _has_characteristic(client: BleakClientWithServiceCache, uuid: str) -> bool:

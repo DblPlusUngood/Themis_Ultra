@@ -152,6 +152,44 @@ class EspressoMonitor:
         self._last_publish_at = now
 
 
+def preferred_advertisement_time(
+    service_info_time: float | None,
+    callback_time: float | None,
+) -> float | None:
+    """Prefer the scanner's last-seen time over a change-only callback.
+
+    Home Assistant does not invoke advertisement callbacks again while the
+    payload is unchanged, so a callback timestamp goes stale on a monitor
+    that keeps advertising the same name and services.
+    """
+    if service_info_time is not None:
+        return service_info_time
+    return callback_time
+
+
+def should_retry_extraction_command(
+    *,
+    connected: bool,
+    command_pending: bool,
+    closing: bool,
+) -> bool:
+    """Return True when a failed start/stop should be sent again on the open link."""
+    return connected and command_pending and not closing
+
+
+def battery_available(
+    *,
+    connected: bool,
+    has_live_battery: bool,
+    has_cached_value: bool,
+    coordinator_success: bool,
+) -> bool:
+    """Keep the last battery percentage visible after the monitor sleeps."""
+    if connected and has_live_battery:
+        return coordinator_success
+    return has_cached_value
+
+
 def advertisement_is_fresh(
     last_seen: float | None,
     now: float,
